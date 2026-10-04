@@ -152,6 +152,8 @@ Item {
     }
 
     component Copy: Text {
+        // Diagnostics and filenames are untrusted text, never HTML/resources.
+        textFormat: Text.PlainText
         color: theme.foreground
         font.family: theme.font
         font.pixelSize: 12

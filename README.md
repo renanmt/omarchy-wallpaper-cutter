@@ -181,6 +181,12 @@ without export, migration, reset, and invalid input. The Qt test performs real
 mouse clicks and drags on the zoom slider. Geometry tests cover horizontal
 and vertical chains, individual offsets, corner-only contact, and existing gaps.
 
+For the native diagnostic-rendering regression check (requires a running
+Wayland session), run `python3 tests/check_plaintext_ui.py`. It opens isolated
+editor windows and uses a loopback-only HTTP server to verify that markup in
+error messages cannot load an embedded image. An AutoText copy is the positive
+control; the real editor must render plain text and make zero image requests.
+
 ## Development
 
 The UI is QML, crop geometry is JavaScript, and image processing uses Python
