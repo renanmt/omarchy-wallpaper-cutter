@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
+if [[ ${1:-} == --standalone ]]; then
+  exec qs -p "$project/shell.qml"
+fi
+exec omarchy-shell shell summon renan.wallpaper-cutter '{}'

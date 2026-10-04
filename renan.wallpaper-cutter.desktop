@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Wallpaper Cutter
+Comment=Compose one wallpaper across all your displays
+Exec=omarchy-shell shell summon renan.wallpaper-cutter {}
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Categories=Graphics;Utility;

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="560" viewBox="0 0 1280 560">
+<defs>
+ <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#111e35"/><stop offset="1" stop-color="#ec977f"/></linearGradient>
+ <clipPath id="screens"><rect x="194" y="124" width="184" height="326"/><rect x="400" y="167" width="480" height="270"/><rect x="902" y="124" width="184" height="326"/></clipPath>
+</defs>
+<rect width="1280" height="560" fill="#101315"/>
+<g fill="#cacccc" font-family="monospace"><text x="54" y="57" font-size="22" letter-spacing="4">WALLPAPER CUTTER</text><text x="54" y="86" font-size="13" fill="#8d959b">ONE IMAGE. EVERY DISPLAY.</text><text x="1080" y="57" font-size="13" fill="#ec977f">OMARCHY</text></g>
+<g clip-path="url(#screens)"><rect x="194" y="100" width="892" height="350" fill="url(#sky)"/><circle cx="688" cy="236" r="65" fill="#ffd3a3"/><path d="M180 398 L340 237 487 375 583 292 770 426 919 261 1100 420 V480 H180Z" fill="#334250"/><path d="M160 470 L390 325 535 444 791 314 1030 420 1120 377 V490 H160Z" fill="#1a2935"/><path d="M140 480 Q390 375 565 447 T1120 440 V500 H140Z" fill="#101c27"/></g>
+<g fill="none" stroke="#697780"><rect x="194" y="124" width="184" height="326"/><rect x="400" y="167" width="480" height="270" stroke="#ec977f" stroke-width="2"/><rect x="902" y="124" width="184" height="326"/></g>
+<g fill="#a4acb2" font-family="monospace" font-size="12" text-anchor="middle"><text x="286" y="476">PORTRAIT</text><text x="640" y="476">LIVE COMPOSITION</text><text x="994" y="476">PORTRAIT</text><text x="640" y="526" fill="#ec977f" letter-spacing="2">DETECT · ALIGN · CUT · APPLY</text></g>
+</svg>
