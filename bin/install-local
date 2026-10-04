@@ -4,7 +4,7 @@ project=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
 plugins="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
 target="$plugins/renan.wallpaper-cutter"
 applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-python3 -c 'from PIL import Image' || { echo 'Install python-pillow with: omarchy pkg add python-pillow' >&2; exit 1; }
+command -v magick >/dev/null || { echo 'ImageMagick is missing; standard Omarchy installations include it.' >&2; exit 1; }
 omarchy plugin validate "$project"
 if [[ -e $target || -L $target ]]; then
   [[ $(readlink -f -- "$target") == "$project" ]] || { echo "Refusing to replace $target" >&2; exit 1; }

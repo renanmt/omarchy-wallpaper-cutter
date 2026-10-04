@@ -1,6 +1,6 @@
 # Wallpaper Cutter
 
-![Wallpaper Cutter — one image across three displays](docs/hero.svg)
+![Wallpaper Cutter composing one image across three displays](preview.png)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-8caaee)](LICENSE)
 [![Omarchy plugin](https://img.shields.io/badge/Omarchy-panel_%2B_service-ec977f)](manifest.json)
@@ -24,7 +24,6 @@ Inspired by [wallpaper-cutter](https://github.com/renantonheiro/wallpaper-cutter
 ## Install
 
 ```bash
-omarchy pkg add python-pillow
 omarchy plugin add https://github.com/renanmt/omarchy-wallpaper-cutter --enable
 omarchy-shell shell summon renan.wallpaper-cutter '{}'
 ```
@@ -42,12 +41,11 @@ Omarchy shell; its wallpaper service remains active when you close the window.
 ## Run locally
 
 Requires Omarchy Quattro with its plugin-capable shell, Quickshell, Python 3,
-and Pillow (`python-pillow` on Arch). Node is only used for geometry tests.
+and ImageMagick (`magick`). These runtime tools come with standard Omarchy
+installations; no pip packages or extra image-library installation is needed.
+Node and Qt Test are only used for development tests.
 
 ```bash
-# If Pillow is missing:
-omarchy pkg add python-pillow
-
 # Development preview, without installing the plugin:
 ./bin/wallpaper-cutter --standalone
 ```
@@ -146,10 +144,11 @@ State lives under `$XDG_STATE_HOME/omarchy-wallpaper-cutter`, falling back to
 - `exports/cut-…/`: PNGs and a reproducible `layout.json` for each apply.
 - `preview-….jpg`: EXIF-normalized preview images (up to 3840 px).
 
-Exports are RGB PNGs; embedded color profiles/HDR workflows and image rotation
-controls are not supported yet. Old exports and preview files are retained;
+Exports are 8-bit RGB PNGs. Images are EXIF-oriented and converted to sRGB;
+transparent areas are flattened onto black. Animated/multi-page files use the
+first frame. HDR workflows and image rotation controls are not supported yet. Old exports and preview files are retained;
 you may remove unused ones manually after restoring the stock wallpaper.
-No image is uploaded. Only the Python helper reads/writes image files, and
+No image is uploaded. The Python helper invokes ImageMagick for image processing, and
 commands are passed as argument arrays without shell interpolation.
 
 ## Remove a local installation
@@ -170,7 +169,7 @@ removed with `omarchy plugin remove renan.wallpaper-cutter` instead.
 
 ```bash
 omarchy plugin validate .
-python3 -m unittest discover -s tests -v
+python3 -S -m unittest discover -s tests -v
 node tests/test_geometry.cjs
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software /usr/lib/qt6/bin/qmltestrunner -input tests
 ```
@@ -185,7 +184,7 @@ and vertical chains, individual offsets, corner-only contact, and existing gaps.
 ## Development
 
 The UI is QML, crop geometry is JavaScript, and image processing uses Python
-and Pillow. The installed plugin uses Omarchy's v1 `panel` and `service`
+and the system ImageMagick command. The installed plugin uses Omarchy's v1 `panel` and `service`
 contracts. No network service is started and no image is uploaded.
 
 | File | Purpose |
@@ -201,5 +200,6 @@ For publishing requirements, see the [Omarchy marketplace guide](https://plugins
 
 ## License
 
-[MIT](LICENSE) © Renan Tonheiro. The README illustration is an original SVG
-included under the same license.
+[MIT](LICENSE) © Renan Tonheiro. The screenshot shows the real editor using an original AI-generated demo
+wallpaper. See [preview asset notes](docs/preview-assets.md) for the prompt and
+reproduction details. Project preview assets are included under the same license.

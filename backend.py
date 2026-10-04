@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from PIL import Image, ImageOps
+from contextlib import contextmanager
 
 STATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'omarchy-wallpaper-cutter'
 
@@ -43,22 +43,46 @@ def monitors(raw=None):
     return sorted(result, key=lambda m: (m['x'], m['y'], m['name']))
 
 
-def read_image(path):
-    image = Image.open(Path(path).expanduser())
-    image = ImageOps.exif_transpose(image)
-    return image.convert('RGB')
+def magick(arguments, stdin=None):
+    try:
+        result = subprocess.run(['magick', *map(str, arguments)], stdin=stdin,
+                                capture_output=True, timeout=120, check=True)
+    except FileNotFoundError as error:
+        raise RuntimeError('ImageMagick (magick) is missing. It is included with standard Omarchy installations.') from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError('Image processing timed out after 120 seconds.') from error
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(error.stderr.decode(errors='replace').strip() or 'ImageMagick could not process this image.') from error
+    return result.stdout.decode().strip()
+
+
+@contextmanager
+def normalized_image(path):
+    # Read an actual local file through stdin, so brackets/colons in filenames
+    # cannot be interpreted as ImageMagick selectors or pseudo-image operators.
+    with tempfile.TemporaryDirectory(prefix='wallpaper-cutter-') as temporary:
+        normalized = Path(temporary) / 'source.miff'
+        with Path(path).expanduser().open('rb') as source:
+            dimensions = magick(['-[0]', '-auto-orient', '-colorspace', 'sRGB',
+                                 '-background', 'black', '-alpha', 'remove', '-alpha', 'off',
+                                 '+repage', '-strip', '-write', normalized,
+                                 '-format', '%w %h', 'info:'], stdin=source)
+        width, height = map(int, dimensions.split())
+        yield normalized, width, height
 
 
 def inspect(path):
-    image = read_image(path)
     STATE.mkdir(parents=True, exist_ok=True)
-    # Preview and export use the same EXIF orientation and RGB conversion.
     preview = STATE / ('preview-' + uuid.uuid4().hex + '.jpg')
-    original_size = image.size
-    image.thumbnail((3840, 3840), Image.Resampling.LANCZOS)
-    image.save(preview, quality=93)
+    try:
+        with normalized_image(path) as (normalized, width, height):
+            magick([normalized, '-filter', 'Lanczos', '-resize', '3840x3840>',
+                    '-quality', '93', preview])
+    except Exception:
+        preview.unlink(missing_ok=True)
+        raise
     return dict(path=str(Path(path).expanduser().resolve()), preview=preview.as_uri(),
-                width=original_size[0], height=original_size[1])
+                width=width, height=height)
 
 
 def number(value, minimum=-1000000, maximum=1000000):
@@ -98,7 +122,11 @@ def load_settings():
 
 
 def render(request):
-    image = read_image(request['image']['path'])
+    with normalized_image(request['image']['path']) as (image, width, height):
+        return render_normalized(request, image, width, height)
+
+
+def render_normalized(request, image, width, height):
     scale = number(request['imageScale'], 0.00001, 10000)
     ix, iy = number(request['imageX']), number(request['imageY'])
     frames = request['frames']
@@ -115,9 +143,9 @@ def render(request):
         w, h = number(m['width'], 1), number(m['height'], 1)
         pw, ph = int(number(m['pixelWidth'], 1, 16384)), int(number(m['pixelHeight'], 1, 16384))
         box = ((x-ix)/scale, (y-iy)/scale, (x+w-ix)/scale, (y+h-iy)/scale)
-        if box[0] < -0.01 or box[1] < -0.01 or box[2] > image.width+0.01 or box[3] > image.height+0.01:
+        if box[0] < -0.01 or box[1] < -0.01 or box[2] > width+0.01 or box[3] > height+0.01:
             raise ValueError('The image must cover every display. Choose Fill layout or move the image back inside the frames.')
-        box = (max(0, box[0]), max(0, box[1]), min(image.width, box[2]), min(image.height, box[3]))
+        box = (max(0, box[0]), max(0, box[1]), min(width, box[2]), min(height, box[3]))
         crops.append((m, box, (pw, ph)))
     # A unique directory avoids overwriting previous exports, even on failure.
     directory = Path(request.get('directory') or STATE / 'exports').expanduser() / ('cut-' + uuid.uuid4().hex[:12])
@@ -127,7 +155,14 @@ def render(request):
         for i, (m, box, size) in enumerate(crops):
             name = re.sub(r'[^A-Za-z0-9_.-]', '_', m['name'])
             path = directory / f'{i+1:02d}-{name}-{size[0]}x{size[1]}.png'
-            image.resize(size, Image.Resampling.LANCZOS, box=box).save(path)
+            # Affine mapping keeps fractional source edges; integer -crop would
+            # round away small alignment/zoom changes. Viewport fixes output size.
+            sx, sy = size[0] / (box[2] - box[0]), size[1] / (box[3] - box[1])
+            matrix = f'{sx},0,0,{sy},{-box[0]*sx},{-box[1]*sy}'
+            magick([image, '-virtual-pixel', 'edge', '-filter', 'Lanczos',
+                    '-define', f'distort:viewport={size[0]}x{size[1]}+0+0',
+                    '-distort', 'AffineProjection', matrix, '+repage',
+                    '-depth', '8', '-strip', 'PNG24:' + str(path)])
             outputs[m['name']] = path.as_uri()
         atomic_json(directory / 'layout.json', request)
         atomic_json(STATE / 'session.json', request)
