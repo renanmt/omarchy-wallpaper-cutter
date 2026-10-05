@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 import Quickshell
 import Quickshell.Io
 import "Geometry.js" as Geometry
@@ -24,7 +23,8 @@ Item {
     property bool sessionLoaded: false
     property bool loadSessionNext: false
     property string exportDirectory: ""
-    readonly property bool busy: worker.running
+    property string exportName: ""
+    readonly property bool busy: worker.running || picker.running
     readonly property var frames: Geometry.frames(monitors, gap, adjustments)
     readonly property var bounds: Geometry.bounds(frames)
     readonly property real baseScale: picture ? Math.max(bounds.width/picture.width, bounds.height/picture.height) : 1
@@ -39,6 +39,7 @@ Item {
     property string pendingSettings: ""
     property string settingsStatus: "Loading saved adjustments…"
     readonly property bool settingsBusy: settingsReader.running || settingsWriter.running || pendingSettings !== ""
+    onOpenedChanged: if (!opened) picker.running = false
     onGapChanged: saveSettings()
     onAdjustmentsChanged: saveSettings()
 
@@ -106,9 +107,14 @@ Item {
         var m = frames[selected];
         return m && adjustments[m.name] ? adjustments[m.name][axis] : 0;
     }
+    function beginExport() {
+        var filename = picture.name || picture.path.slice(picture.path.lastIndexOf("/") + 1);
+        exportName = "cut-" + filename.replace(/\.[^.]+$/, "");
+        choosePath("export");
+    }
     function exportImages(apply) {
         var data = {image: picture, frames: frames, imageScale:imageScale, imageX:imageX, imageY:imageY,
-            gap:gap, adjustments:adjustments, zoom:zoom, panX:panX, panY:panY, apply:apply, directory:exportDirectory};
+            gap:gap, adjustments:adjustments, zoom:zoom, panX:panX, panY:panY, apply:apply, directory:exportDirectory, exportName:apply ? "" : exportName};
         run("export", [JSON.stringify(data)]);
         message = apply ? "Cutting and applying wallpapers…" : "Exporting full-resolution PNGs…";
     }
@@ -129,26 +135,69 @@ Item {
                         root.picture = saved.image;
                         root.zoom = saved.zoom || 1; root.panX = saved.panX || 0; root.panY = saved.panY || 0;
                         root.message = "Last exported composition restored. Display layout refreshed.";
+                    } else if (root.job === "import") {
+                        var imported = result.data;
+                        root.picture = imported.image;
+                        root.gap = imported.gap; root.adjustments = imported.adjustments;
+                        root.zoom = imported.zoom; root.panX = imported.panX; root.panY = imported.panY;
+                        root.message = "Cut imported. Review it on your current displays, then apply.";
                     } else if (root.job === "inspect") {
                         root.picture = result.data; root.fit(); root.message = "Drag the image to compose. Scroll to zoom. Arrow keys for precise movement.";
                     } else if (root.job === "export") {
-                        root.message = (result.data.applied ? "Applied. PNGs saved to " : "Exported to ") + result.data.directory;
+                        root.message = (result.data.themeChanged ? "Theme changed; kept the theme wallpaper. Export saved to " : result.data.applied ? "Applied. PNGs saved to " : "Exported to ") + result.data.directory;
                     } else if (root.job === "restore") root.message = "Omarchy wallpaper restored.";
                 } catch (e) { root.error = true; root.message = "Unable to read helper response: " + e; }
             }
         }
         stderr: StdioCollector { onStreamFinished: if (text.trim()) { root.error = true; root.message = text.trim(); } }
     }
-    FileDialog {
-        id: chooser
-        title: "Choose a wallpaper"
-        nameFilters: ["Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)"]
-        onAccepted: root.run("inspect", [decodeURIComponent(selectedFile.toString().replace("file://", ""))])
+    function choosePath(mode) {
+        if (busy) return;
+        picker.mode = mode;
+        picker.reply = null;
+        var start = mode === "image" && picture ? picture.path.slice(0, picture.path.lastIndexOf("/")) : exportDirectory;
+        picker.environment = {WALLPAPER_CUTTER_PICKER_MODE: mode, WALLPAPER_CUTTER_EXPORT_NAME: exportName,
+            WALLPAPER_CUTTER_PICKER_FOLDER: start ? "file://" + encodeURI(start).replace(/#/g, "%23").replace(/\?/g, "%3F") : ""};
+        picker.running = true;
     }
-    FolderDialog {
-        id: folder
-        title: "Export wallpapers into a new folder here"
-        onAccepted: { root.exportDirectory = decodeURIComponent(selectedFolder.toString().replace("file://", "")); root.exportImages(false); }
+    Process {
+        id: picker
+        property string mode: ""
+        onStarted: console.log("Wallpaper Cutter native picker PID:", processId)
+        property var reply: null
+        command: ["qs", "--no-color", "--log-rules", "qml.debug=true", "-p", root.helper.slice(0, root.helper.lastIndexOf("/")) + "/Picker.qml"]
+        function readReply(text) {
+            var marker = "WALLPAPER_CUTTER_PICKER_RESULT ";
+            text.split("\n").forEach(function(line) {
+                var index = line.indexOf(marker);
+                if (index >= 0) {
+                    try { reply = JSON.parse(line.slice(index + marker.length)); } catch(e) {}
+                }
+            });
+        }
+        stdout: StdioCollector { onStreamFinished: picker.readReply(text) }
+        stderr: StdioCollector { onStreamFinished: picker.readReply(text) }
+        onExited: Qt.callLater(function() {
+            if (!root.opened) return;
+            if (!picker.reply || typeof picker.reply.url !== "string") {
+                root.error = true;
+                root.message = "The file picker closed unexpectedly. Please try again.";
+                return;
+            }
+            var url = picker.reply.url;
+            if (!url) return; // Cancellation leaves the composition untouched.
+            if (url.indexOf("file://") !== 0) {
+                root.error = true; root.message = "Choose a local file or folder."; return;
+            }
+            var path = decodeURIComponent(url.slice(7));
+            if (picker.mode === "image") root.run("inspect", [path]);
+            else if (picker.mode === "import") root.run("import", [path]);
+            else if (picker.mode === "export") {
+                root.exportDirectory = path.slice(0, path.lastIndexOf("/")) || "/";
+                root.exportName = path.slice(path.lastIndexOf("/") + 1);
+                root.exportImages(false);
+            }
+        })
     }
 
     component Copy: Text {
@@ -212,7 +261,8 @@ Item {
                 }
                 Item { Layout.fillWidth: true }
                 Copy { text: root.monitors.length + " DISPLAYS"; color: theme.accent; font.pixelSize: 10; font.letterSpacing: 1 }
-                Action { text: "Choose image"; enabled: !root.busy; onClicked: chooser.open() }
+                Action { text: "Import cut…"; enabled: !root.busy; onClicked: root.choosePath("import") }
+                Action { text: "Choose image"; enabled: !root.busy; onClicked: root.choosePath("image") }
             }
             Rule {}
             RowLayout {
@@ -378,12 +428,12 @@ Item {
                 Layout.fillWidth: true; Layout.margins: 20; spacing: 12
                 Rectangle { width: 6; height: 6; radius: 3; color: root.error ? "#e78284" : theme.accent }
                 Copy { Layout.fillWidth: true; text: root.picture && !root.covered ? "Image does not cover every display. Use Fill layout or adjust the composition." : root.message; color: root.error ? "#e78284" : theme.muted; font.pixelSize: 11; wrapMode: Text.WordWrap; maximumLineCount: 3 }
-                Action { text: "Export…"; enabled: root.covered && !root.busy; onClicked: folder.open() }
+                Action { text: "Export…"; enabled: root.covered && !root.busy; onClicked: root.beginExport() }
                 Action { text: root.busy ? "Working…" : "Apply wallpapers"; primary: true; enabled: root.covered && !root.busy; onClicked: { root.exportDirectory=""; root.exportImages(true); } }
             }
         }
         }
-        Shortcut { sequence: "Ctrl+O"; onActivated: if(!root.busy) chooser.open() }
+        Shortcut { sequence: "Ctrl+O"; onActivated: if(!root.busy) root.choosePath("image") }
         Shortcut { sequence: "Escape"; onActivated: root.close() }
     }
 }

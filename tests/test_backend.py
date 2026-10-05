@@ -48,6 +48,70 @@ class CutterTest(unittest.TestCase):
                     frames=[dict(name='DP-1', x=-100, y=-20, width=200, height=100, pixelWidth=200, pixelHeight=100),
                             dict(name='DP-2', x=100, y=-20, width=200, height=100, pixelWidth=400, pixelHeight=200)])
 
+    def test_named_exports_and_collision_suffix(self):
+        req = self.request()
+        self.assertEqual(Path(backend.render(req)['directory']).name, 'cut-source')
+        req['exportName'] = 'Summer sunset'
+        first = backend.render(req)
+        self.assertEqual(Path(first['directory']).name, 'Summer sunset')
+        self.assertEqual(Path(backend.render(req)['directory']).name, 'Summer sunset-2')
+        self.assertTrue((Path(first['directory']) / 'layout.json').exists())
+
+    def test_invalid_export_names_cannot_escape_parent(self):
+        for name in ('../outside', '/tmp/outside', 'a/b', 'a\\b', '.', '..', '   ', 'a\nname'):
+            req = self.request(); req['exportName'] = name
+            with self.subTest(name=name), self.assertRaises(ValueError): backend.render(req)
+        self.assertFalse((backend.STATE / 'exports').exists())
+
+    def test_portable_import_restores_composition_without_applying(self):
+        req = self.request()
+        req.update(gap=23, adjustments={'DP-1': {'x': -4, 'y': 8}}, zoom=1.5, panX=7, panY=-9)
+        output = Path(backend.render(req)['directory'])
+        moved = self.path / 'moved cut'
+        output.rename(moved)
+        self.source.unlink()
+        imported = backend.import_layout(moved / 'layout.json')
+        self.assertEqual(imported['gap'], 23)
+        self.assertEqual(imported['adjustments'], req['adjustments'])
+        self.assertEqual((imported['zoom'], imported['panX'], imported['panY']), (1.5, 7, -9))
+        self.assertEqual(Path(imported['image']['path']).parent, moved)
+        self.assertFalse((backend.STATE / 'applied.json').exists())
+        self.assertFalse((backend.CONFIG / 'settings.json').exists())
+
+    def test_legacy_import_and_invalid_import(self):
+        layout = self.path / 'layout.json'
+        req = self.request(); backend.atomic_json(layout, req)
+        self.assertEqual(backend.import_layout(layout)['image']['width'], 400)
+        req['sourceImage'] = '../source.ppm'; backend.atomic_json(layout, req)
+        with self.assertRaises(ValueError): backend.import_layout(layout)
+        req.pop('sourceImage'); req['zoom'] = float('nan'); backend.atomic_json(layout, req)
+        with self.assertRaises(ValueError): backend.import_layout(layout)
+
+    def test_theme_change_clears_wallpapers_but_preserves_work(self):
+        req = self.request(); req['apply'] = True
+        output = backend.render(req)
+        backend.save_settings({'gap': 23})
+        session = (backend.STATE / 'session.json').read_bytes()
+        backend.restore(theme_changed=True)
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
+        self.assertEqual((backend.STATE / 'session.json').read_bytes(), session)
+        self.assertEqual(backend.load_settings()['gap'], 23)
+        self.assertTrue(Path(output['directory']).exists())
+
+    def test_theme_change_during_export_wins_over_apply(self):
+        req = self.request(); req['apply'] = True
+        original = backend.magick
+        def theme_during_crop(args, stdin=None):
+            if '-distort' in args: backend.restore(theme_changed=True)
+            return original(args, stdin)
+        with patch.object(backend, 'magick', side_effect=theme_during_crop):
+            result = backend.render(req)
+        self.assertTrue(result['themeChanged'])
+        self.assertFalse(result['applied'])
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
+        self.assertTrue(Path(result['directory']).exists())
+        self.assertTrue(backend.render(req)['applied'])
+
     def test_rotation_scale_negative_origin_and_mirror(self):
         raw = [dict(name='DP-1', width=1920, height=1080, x=-720, y=-100, transform=3, scale=1.5),
                dict(name='mirror', width=1920, height=1080, x=0, y=0, mirrorOf='DP-1')]

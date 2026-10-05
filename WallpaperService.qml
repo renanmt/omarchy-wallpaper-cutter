@@ -5,6 +5,18 @@ import Quickshell.Wayland
 
 Item {
     id: root
+    // Only the installed service receives this facade; standalone previews
+    // never register themselves as installed applications.
+    property var shell: null
+    readonly property string launcherHelper: decodeURIComponent(Qt.resolvedUrl("launcher.py").toString().replace("file://", ""))
+    readonly property string launcherSocket: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/wallpaper-cutter-" + Quickshell.processId + "-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".sock"
+    SocketServer {
+        id: launcherLifetime
+        path: root.launcherSocket
+        active: root.shell !== null
+        handler: Socket {}
+        onActiveStatusChanged: if (active) Quickshell.execDetached(["python3", root.launcherHelper, root.launcherSocket])
+    }
     property var wallpapers: ({})
     readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state"
     FileView {

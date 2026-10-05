@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Local image I/O and Hyprland discovery. No server or shell interpolation."""
 import json
+import fcntl
+import shutil
 import math
 import os
 from pathlib import Path
@@ -82,7 +84,7 @@ def inspect(path):
         preview.unlink(missing_ok=True)
         raise
     return dict(path=str(Path(path).expanduser().resolve()), preview=preview.as_uri(),
-                width=width, height=height)
+                width=width, height=height, name=Path(path).name)
 
 
 def number(value, minimum=-1000000, maximum=1000000):
@@ -121,12 +123,87 @@ def load_settings():
     return validate_settings({})
 
 
+@contextmanager
+def wallpaper_lock():
+    STATE.mkdir(parents=True, exist_ok=True)
+    with (STATE / '.wallpaper.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def theme_generation():
+    path = STATE / 'theme-generation.json'
+    return path.read_text() if path.exists() else ''
+
+
+def restore(theme_changed=False):
+    with wallpaper_lock():
+        if theme_changed:
+            atomic_json(STATE / 'theme-generation.json', uuid.uuid4().hex)
+        atomic_json(STATE / 'applied.json', {})
+    return {'restored': True}
+
+
+def export_name(request):
+    name = request.get('exportName')
+    if name is None or name == '':
+        stem = re.sub(r'[\\/\x00-\x1f\x7f]', '_', Path(request['image'].get('name') or request['image']['path']).stem)
+        name = 'cut-' + stem.encode('utf-8')[:140].decode('utf-8', errors='ignore')
+    if not isinstance(name, str):
+        raise ValueError('Enter a name for the export.')
+    name = name.strip()
+    if not name or name in ('.', '..') or re.search(r'[\\/\x00-\x1f\x7f]', name) or len(name.encode('utf-8')) > 180:
+        raise ValueError('Use a folder name up to 180 bytes, without slashes or control characters.')
+    return name
+
+
+def export_directory(parent, name):
+    parent.mkdir(parents=True, exist_ok=True)
+    for index in range(1, 10000):
+        path = parent / (name if index == 1 else f'{name}-{index}')
+        try:
+            path.mkdir()
+            return path
+        except FileExistsError:
+            continue
+    raise ValueError('Too many exports with this name. Choose a different name.')
+
+
+def import_layout(path):
+    path = Path(path).expanduser().resolve()
+    if path.is_dir():
+        path /= 'layout.json'
+    if path.stat().st_size > 1024 * 1024:
+        raise ValueError('This layout file is too large.')
+    data = json.loads(path.read_text())
+    settings = validate_settings(data)
+    zoom = number(data.get('zoom', 1), 0.25, 4)
+    pan_x, pan_y = number(data.get('panX', 0)), number(data.get('panY', 0))
+    if data.get('sourceImage'):
+        source_name = data['sourceImage']
+        if not isinstance(source_name, str) or Path(source_name).name != source_name or source_name in ('.', '..'):
+            raise ValueError('Invalid source image in this export.')
+        image_path = (path.parent / source_name).resolve()
+        if image_path.parent != path.parent:
+            raise ValueError('The source image must be inside the exported folder.')
+    else:
+        image_path = Path(data['image']['path']).expanduser()
+    if not image_path.is_file():
+        raise ValueError('The original image is missing. Keep the source image with the exported layout.')
+    image = inspect(image_path)
+    image['name'] = str(data['image'].get('name') or Path(data['image']['path']).name)
+    return dict(image=image, gap=settings['gap'], adjustments=settings['adjustments'],
+                zoom=zoom, panX=pan_x, panY=pan_y)
+
+
 def render(request):
+    name = export_name(request)
+    generation = theme_generation()
     with normalized_image(request['image']['path']) as (image, width, height):
-        return render_normalized(request, image, width, height)
+        return render_normalized(request, image, width, height, name, generation)
 
 
-def render_normalized(request, image, width, height):
+def render_normalized(request, image, width, height, directory_name, generation):
     scale = number(request['imageScale'], 0.00001, 10000)
     ix, iy = number(request['imageX']), number(request['imageY'])
     frames = request['frames']
@@ -148,8 +225,7 @@ def render_normalized(request, image, width, height):
         box = (max(0, box[0]), max(0, box[1]), min(width, box[2]), min(height, box[3]))
         crops.append((m, box, (pw, ph)))
     # A unique directory avoids overwriting previous exports, even on failure.
-    directory = Path(request.get('directory') or STATE / 'exports').expanduser() / ('cut-' + uuid.uuid4().hex[:12])
-    directory.mkdir(parents=True, exist_ok=False)
+    directory = export_directory(Path(request.get('directory') or STATE / 'exports').expanduser(), directory_name)
     outputs = {}
     try:
         for i, (m, box, size) in enumerate(crops):
@@ -164,16 +240,24 @@ def render_normalized(request, image, width, height):
                     '-distort', 'AffineProjection', matrix, '+repage',
                     '-depth', '8', '-strip', 'PNG24:' + str(path)])
             outputs[m['name']] = path.as_uri()
-        atomic_json(directory / 'layout.json', request)
+        source = Path(request['image']['path']).expanduser()
+        source_name = 'source' + source.suffix
+        shutil.copyfile(source, directory / source_name)
+        layout = dict(request, sourceImage=source_name, version=1)
+        atomic_json(directory / 'layout.json', layout)
         atomic_json(STATE / 'session.json', request)
+        applied = False
         if request.get('apply'):
-            atomic_json(STATE / 'applied.json', outputs)
+            with wallpaper_lock():
+                if theme_generation() == generation:
+                    atomic_json(STATE / 'applied.json', outputs)
+                    applied = True
     except Exception:
         for path in directory.iterdir():
             path.unlink()
         directory.rmdir()
         raise
-    return dict(directory=str(directory), outputs=outputs, applied=bool(request.get('apply')))
+    return dict(directory=str(directory), outputs=outputs, applied=applied, themeChanged=bool(request.get('apply')) and not applied)
 
 
 def main():
@@ -188,9 +272,10 @@ def main():
         return inspect(sys.argv[2])
     if command == 'export':
         return render(json.loads(sys.argv[2]))
-    if command == 'restore':
-        atomic_json(STATE / 'applied.json', {})
-        return {'restored': True}
+    if command == 'import':
+        return import_layout(sys.argv[2])
+    if command in ('restore', 'theme-changed'):
+        return restore(command == 'theme-changed')
     if command == 'session':
         path = STATE / 'session.json'
         if not path.exists():
@@ -198,7 +283,10 @@ def main():
         data = json.loads(path.read_text())
         if not Path(data['image']['path']).is_file():
             return None
+        original_name = data['image'].get('name')
         data['image'] = inspect(data['image']['path'])
+        if original_name:
+            data['image']['name'] = original_name
         return data
     raise ValueError('Unknown command')
 

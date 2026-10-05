@@ -3,7 +3,6 @@ set -euo pipefail
 project=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
 plugins="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins"
 target="$plugins/renan.wallpaper-cutter"
-applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 command -v magick >/dev/null || { echo 'ImageMagick is missing; standard Omarchy installations include it.' >&2; exit 1; }
 omarchy plugin validate "$project"
 if [[ -e $target || -L $target ]]; then
@@ -12,8 +11,6 @@ else
   mkdir -p -- "$plugins"
   ln -s -- "$project" "$target"
 fi
-mkdir -p -- "$applications"
-cp -- "$project/renan.wallpaper-cutter.desktop" "$applications/renan.wallpaper-cutter.desktop"
 omarchy-shell shell rescanPlugins
 omarchy plugin enable renan.wallpaper-cutter
 printf '%s\n' 'Installed. Open Wallpaper Cutter from the app launcher.'
