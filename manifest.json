@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "renan.wallpaper-cutter",
   "name": "Wallpaper Cutter",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "Renan Tonheiro",
   "license": "MIT",
   "description": "Compose one image across your displays with live cropping, bezel compensation and individual wallpapers.",
