@@ -141,8 +141,9 @@ Item {
                         root.gap = imported.gap; root.adjustments = imported.adjustments;
                         root.zoom = imported.zoom; root.panX = imported.panX; root.panY = imported.panY;
                         root.message = "Cut imported. Review it on your current displays, then apply.";
-                    } else if (root.job === "inspect") {
-                        root.picture = result.data; root.fit(); root.message = "Drag the image to compose. Scroll to zoom. Arrow keys for precise movement.";
+                    } else if (root.job === "inspect" || root.job === "omarchy-wallpaper") {
+                        root.picture = result.data; root.fit();
+                        root.message = (root.job === "omarchy-wallpaper" ? "Active Omarchy wallpaper loaded. " : "") + "Drag the image to compose. Scroll to zoom. Arrow keys for precise movement.";
                     } else if (root.job === "export") {
                         root.message = (result.data.themeChanged ? "Theme changed; kept the theme wallpaper. Export saved to " : result.data.applied ? "Applied. PNGs saved to " : "Exported to ") + result.data.directory;
                     } else if (root.job === "restore") root.message = "Omarchy wallpaper restored.";
@@ -262,6 +263,7 @@ Item {
                 Item { Layout.fillWidth: true }
                 Copy { text: root.monitors.length + " DISPLAYS"; color: theme.accent; font.pixelSize: 10; font.letterSpacing: 1 }
                 Action { text: "Import cut…"; enabled: !root.busy; onClicked: root.choosePath("import") }
+                Action { text: "Use Omarchy wallpaper"; enabled: !root.busy; onClicked: root.run("omarchy-wallpaper", []) }
                 Action { text: "Choose image"; enabled: !root.busy; onClicked: root.choosePath("image") }
             }
             Rule {}

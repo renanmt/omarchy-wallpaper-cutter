@@ -17,6 +17,9 @@ STATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))
 
 CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or str(Path.home() / '.config')) / 'omarchy-wallpaper-cutter'
 
+# Omarchy's theme tools always maintain this link under ~/.local/state.
+OMARCHY_BACKGROUND = Path.home() / '.local/state/omarchy/current/background'
+
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as f:
@@ -85,6 +88,13 @@ def inspect(path):
         raise
     return dict(path=str(Path(path).expanduser().resolve()), preview=preview.as_uri(),
                 width=width, height=height, name=Path(path).name)
+
+
+def omarchy_wallpaper():
+    path = OMARCHY_BACKGROUND.resolve()
+    if not path.is_file():
+        raise ValueError('No active Omarchy wallpaper found. Set one with Omarchy’s background switcher first.')
+    return inspect(path)
 
 
 def number(value, minimum=-1000000, maximum=1000000):
@@ -270,6 +280,8 @@ def main():
         return monitors()
     if command == 'inspect':
         return inspect(sys.argv[2])
+    if command == 'omarchy-wallpaper':
+        return omarchy_wallpaper()
     if command == 'export':
         return render(json.loads(sys.argv[2]))
     if command == 'import':
