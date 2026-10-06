@@ -18,6 +18,7 @@ class CutterTest(unittest.TestCase):
         self.path = Path(self.temp.name)
         backend.STATE = self.path / 'state'
         backend.CONFIG = self.path / 'config'
+        backend.OMARCHY_BACKGROUND = self.path / 'omarchy/current/background'
         self.source = self.path / 'source.ppm'
         self.source.write_bytes(b'P6\n400 100\n255\n' + (bytes((255,0,0))*200 + bytes((0,0,255))*200)*100)
 
@@ -37,6 +38,13 @@ class CutterTest(unittest.TestCase):
         self.assertEqual(backend.load_settings()['gap'], 10)
         backend.save_settings({'gap': 40})
         self.assertEqual(backend.load_settings()['gap'], 40)
+
+    def test_omarchy_wallpaper_follows_background_link(self):
+        with self.assertRaisesRegex(ValueError, 'No active Omarchy wallpaper'): backend.omarchy_wallpaper()
+        backend.OMARCHY_BACKGROUND.parent.mkdir(parents=True)
+        backend.OMARCHY_BACKGROUND.symlink_to(self.source)
+        image = backend.omarchy_wallpaper()
+        self.assertEqual((image['path'], image['name'], image['width'], image['height']), (str(self.source), 'source.ppm', 400, 100))
 
     def test_reset_settings_persists(self):
         backend.save_settings({'gap': 25})

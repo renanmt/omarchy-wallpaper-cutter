@@ -43,7 +43,8 @@ added. Closing the editor keeps applied wallpapers active.
 
 ## Compose
 
-1. Choose a local image. PNG, JPEG, WebP, BMP, and TIFF are supported.
+1. Choose a local image. PNG, JPEG, WebP, BMP, and TIFF are supported, or
+   click **Use Omarchy wallpaper** to start from the active Omarchy background.
 2. The editor reads active independent displays from `hyprctl monitors -j`.
    Use ↻ after changing the monitor layout.
 3. Drag the image, scroll or use the slider to zoom, and use arrow keys to
