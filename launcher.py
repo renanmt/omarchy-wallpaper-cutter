@@ -28,7 +28,7 @@ def locked(directory):
         yield
 
 
-def register(directory, template, owner, name=NAME, marker=OWNER, mode=0o644):
+def register(directory, template, owner, name=NAME, marker=OWNER, mode=0o644, previous_templates=()):
     path = directory / name
     content = template.rstrip() + '\n' + marker + owner + '\n'
     with locked(directory):
@@ -38,7 +38,9 @@ def register(directory, template, owner, name=NAME, marker=OWNER, mode=0o644):
             existing = path.read_text()
             # Accept our managed entries and the exact earlier manual copy.
             base = '\n'.join(line for line in existing.splitlines() if not line.startswith(marker))
-            if base.strip() != template.strip():
+            managed = any(line.startswith(marker) for line in existing.splitlines())
+            previous = managed and any(base.strip() == old.strip() for old in previous_templates)
+            if base.strip() != template.strip() and not previous:
                 raise RuntimeError(f'Keeping customized launcher: {path}')
         temporary = None
         try:
@@ -73,7 +75,8 @@ def main():
     hook_dir = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'omarchy/hooks/theme-set.d'
     hook_name = 'renan.wallpaper-cutter'
     helper = shlex.quote(str(Path(__file__).resolve().with_name('backend.py')))
-    hook_template = '#!/bin/sh\nexec python3 ' + helper + ' theme-changed\n'
+    old_hook_template = '#!/bin/sh\nexec python3 ' + helper + ' theme-changed\n'
+    hook_template = '#!/bin/sh\nexec python3 ' + helper + ' theme-changed "$1"\n'
     hook_content = None
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -83,7 +86,8 @@ def main():
         # unload/crash closes the peer, so no timer or desktop-wide polling runs.
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as lease:
             lease.connect(sys.argv[1])
-            hook_content = register(hook_dir, hook_template, owner, hook_name, '# Wallpaper-Cutter-Owner=', 0o755)
+            hook_content = register(hook_dir, hook_template, owner, hook_name, '# Wallpaper-Cutter-Owner=', 0o755,
+                                    previous_templates=(old_hook_template,))
             register(directory, template, owner)
             lease.sendall(b'ready\n')
             while lease.recv(1):

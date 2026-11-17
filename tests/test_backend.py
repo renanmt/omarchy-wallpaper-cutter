@@ -19,6 +19,9 @@ class CutterTest(unittest.TestCase):
         backend.STATE = self.path / 'state'
         backend.CONFIG = self.path / 'config'
         backend.OMARCHY_BACKGROUND = self.path / 'omarchy/current/background'
+        backend.OMARCHY_THEME = self.path / 'omarchy/current/theme.name'
+        backend.OMARCHY_THEME.parent.mkdir(parents=True)
+        backend.OMARCHY_THEME.write_text('tokyo-night\n')
         self.source = self.path / 'source.ppm'
         self.source.write_bytes(b'P6\n400 100\n255\n' + (bytes((255,0,0))*200 + bytes((0,0,255))*200)*100)
 
@@ -41,7 +44,7 @@ class CutterTest(unittest.TestCase):
 
     def test_omarchy_wallpaper_follows_background_link(self):
         with self.assertRaisesRegex(ValueError, 'No active Omarchy wallpaper'): backend.omarchy_wallpaper()
-        backend.OMARCHY_BACKGROUND.parent.mkdir(parents=True)
+        backend.OMARCHY_BACKGROUND.parent.mkdir(parents=True, exist_ok=True)
         backend.OMARCHY_BACKGROUND.symlink_to(self.source)
         image = backend.omarchy_wallpaper()
         self.assertEqual((image['path'], image['name'], image['width'], image['height']), (str(self.source), 'source.ppm', 400, 100))
@@ -100,17 +103,66 @@ class CutterTest(unittest.TestCase):
         output = backend.render(req)
         backend.save_settings({'gap': 23})
         session = (backend.STATE / 'session.json').read_bytes()
-        backend.restore(theme_changed=True)
+        backend.restore(theme_changed=True, theme='nord')
         self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
         self.assertEqual((backend.STATE / 'session.json').read_bytes(), session)
         self.assertEqual(backend.load_settings()['gap'], 23)
         self.assertTrue(Path(output['directory']).exists())
 
+    def test_login_reapplying_same_theme_preserves_wallpapers(self):
+        req = self.request(); req['apply'] = True
+        output = backend.render(req)
+        generation = backend.theme_generation()
+        # Exercise the command used by the login-time theme-set hook.
+        with patch.object(backend.sys, 'argv', ['backend.py', 'theme-changed', 'tokyo-night']):
+            backend.main()
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), output['outputs'])
+        self.assertEqual(backend.theme_generation(), generation)
+
+    def test_legacy_hook_reads_current_theme(self):
+        req = self.request(); req['apply'] = True
+        output = backend.render(req)
+        backend.restore(theme_changed=True)
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), output['outputs'])
+        backend.OMARCHY_THEME.write_text('nord\n')
+        backend.restore(theme_changed=True)
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
+
+    def test_manual_restore_still_clears_same_theme_wallpapers(self):
+        req = self.request(); req['apply'] = True
+        backend.render(req)
+        backend.restore()
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
+        backend.restore(theme_changed=True, theme='tokyo-night')
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
+
+    def test_unknown_theme_still_clears_wallpapers(self):
+        req = self.request(); req['apply'] = True
+        backend.OMARCHY_THEME.unlink()
+        backend.render(req)
+        backend.restore(theme_changed=True)
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), {})
+
+    def test_same_theme_during_first_export_does_not_cancel_apply(self):
+        req = self.request(); req['apply'] = True
+        original = backend.magick
+        def theme_during_crop(args, stdin=None):
+            if '-distort' in args:
+                backend.restore(theme_changed=True, theme='tokyo-night')
+            return original(args, stdin)
+        with patch.object(backend, 'magick', side_effect=theme_during_crop):
+            result = backend.render(req)
+        self.assertTrue(result['applied'])
+        self.assertFalse(result['themeChanged'])
+        self.assertEqual(json.loads((backend.STATE / 'applied.json').read_text()), result['outputs'])
+
     def test_theme_change_during_export_wins_over_apply(self):
         req = self.request(); req['apply'] = True
         original = backend.magick
         def theme_during_crop(args, stdin=None):
-            if '-distort' in args: backend.restore(theme_changed=True)
+            if '-distort' in args:
+                backend.OMARCHY_THEME.write_text('nord\n')
+                backend.restore(theme_changed=True, theme='nord')
             return original(args, stdin)
         with patch.object(backend, 'magick', side_effect=theme_during_crop):
             result = backend.render(req)

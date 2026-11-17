@@ -19,6 +19,7 @@ CONFIG = Path(os.environ.get('XDG_CONFIG_HOME') or str(Path.home() / '.config'))
 
 # Omarchy's theme tools always maintain this link under ~/.local/state.
 OMARCHY_BACKGROUND = Path.home() / '.local/state/omarchy/current/background'
+OMARCHY_THEME = Path.home() / '.local/state/omarchy/current/theme.name'
 
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,9 +147,24 @@ def theme_generation():
     return path.read_text() if path.exists() else ''
 
 
-def restore(theme_changed=False):
+def current_theme():
+    try:
+        return OMARCHY_THEME.read_text().strip() or None
+    except FileNotFoundError:
+        return None
+
+
+def restore(theme_changed=False, theme=None):
     with wallpaper_lock():
         if theme_changed:
+            # Older managed hooks do not pass a name. Omarchy writes theme.name
+            # before invoking hooks, so they can use the same comparison.
+            theme = theme or current_theme()
+            path = STATE / 'theme.json'
+            previous = json.loads(path.read_text()) if path.exists() else None
+            if theme and theme == previous:
+                return {'restored': False, 'reason': 'theme unchanged'}
+            atomic_json(path, theme)
             atomic_json(STATE / 'theme-generation.json', uuid.uuid4().hex)
         atomic_json(STATE / 'applied.json', {})
     return {'restored': True}
@@ -208,12 +224,18 @@ def import_layout(path):
 
 def render(request):
     name = export_name(request)
-    generation = theme_generation()
+    with wallpaper_lock():
+        generation = theme_generation()
+        theme = current_theme()
+        # Establish a baseline even on the first apply, before slow image work.
+        # A same-theme startup hook must not cancel an in-flight first export.
+        if request.get('apply') and not (STATE / 'theme.json').exists():
+            atomic_json(STATE / 'theme.json', theme)
     with normalized_image(request['image']['path']) as (image, width, height):
-        return render_normalized(request, image, width, height, name, generation)
+        return render_normalized(request, image, width, height, name, generation, theme)
 
 
-def render_normalized(request, image, width, height, directory_name, generation):
+def render_normalized(request, image, width, height, directory_name, generation, theme):
     scale = number(request['imageScale'], 0.00001, 10000)
     ix, iy = number(request['imageX']), number(request['imageY'])
     frames = request['frames']
@@ -260,6 +282,7 @@ def render_normalized(request, image, width, height, directory_name, generation)
         if request.get('apply'):
             with wallpaper_lock():
                 if theme_generation() == generation:
+                    atomic_json(STATE / 'theme.json', theme)
                     atomic_json(STATE / 'applied.json', outputs)
                     applied = True
     except Exception:
@@ -287,7 +310,7 @@ def main():
     if command == 'import':
         return import_layout(sys.argv[2])
     if command in ('restore', 'theme-changed'):
-        return restore(command == 'theme-changed')
+        return restore(command == 'theme-changed', sys.argv[2] if len(sys.argv) > 2 else None)
     if command == 'session':
         path = STATE / 'session.json'
         if not path.exists():

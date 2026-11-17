@@ -113,13 +113,16 @@ clicks pass through to Omarchy. **Restore Omarchy wallpaper** clears the active
 mapping immediately (poll fallback: 1.5 seconds). Disabling the plugin also
 removes its surfaces.
 
-Changing the Omarchy theme automatically clears the per-screen wallpaper
-overrides, revealing the new theme's background. The plugin registers its own
+Changing to a different Omarchy theme automatically clears the per-screen
+wallpaper overrides, revealing the new theme's background. Reapplying the same
+theme, including during login, keeps the applied cuts. The plugin registers its own
 `~/.config/omarchy/hooks/theme-set.d/renan.wallpaper-cutter` hook when enabled
 and removes its managed hook when disabled. It preserves other hooks, saved
 exports, the last composition, and calibration settings. If a theme changes
 during an export, the PNGs are saved but the new theme wallpaper takes priority.
 Closing the editor leaves applied images active until restored or a theme changes.
+After upgrading from v0.4.0 or earlier, apply your cut once to record its theme;
+older saved mappings do not contain that information.
 Disconnecting a monitor removes its
 surface; reconnecting the same output restores the stored image. If output
 resolution or rotation changes, refresh the layout and apply a new cut.
@@ -128,6 +131,8 @@ State lives under `$XDG_STATE_HOME/omarchy-wallpaper-cutter`, falling back to
 `~/.local/state/omarchy-wallpaper-cutter`:
 
 - `applied.json`: output-name → exported PNG mapping, atomically replaced.
+- `theme.json`: theme name used to distinguish a reapply from a theme change.
+- `theme-generation.json`: token preventing an export from overriding a theme change.
 - `session.json`: last successful composition.
 - `exports/cut-…/`: PNGs, the source image, and a reproducible `layout.json` for each apply.
 - `preview-….jpg`: EXIF-normalized preview images (up to 3840 px).
@@ -173,7 +178,9 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software /usr/lib/qt6/bin/qmltestrunn
 Backend tests cover rotation, fractional scale, negative coordinates, EXIF,
 output dimensions, discarded bezel pixels, invalid crops, unique exports, and
 preserving the applied mapping on failure. Settings tests cover persistence
-without export, migration, reset, and invalid input. The Qt test performs real
+without export, migration, reset, and invalid input. Theme tests cover login-time
+reapplication, real theme changes during export, manual restore, and managed-hook
+upgrades and cleanup. The Qt test performs real
 mouse clicks and drags on the zoom slider. Geometry tests cover horizontal
 and vertical chains, individual offsets, corner-only contact, and existing gaps.
 
